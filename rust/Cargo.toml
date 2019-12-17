@@ -1,0 +1,5 @@
+[package]
+name = "flutter_drm"
+version = "0.1.0"
+authors = ["csnewman"]
+edition = "2018"
