@@ -3,3 +3,20 @@ name = "flutter_drm"
 version = "0.1.0"
 authors = ["csnewman"]
 edition = "2018"
+
+[dependencies]
+log = "0.4.6"
+fern = { version = "^0.5", features = ["colored"] }
+chrono = "^0.4"
+winit = "*"
+async-std = "1.2"
+futures-task = "0.3.1"
+parking_lot = "^0.10.0"
+
+[dependencies.smithay]
+path = "../../smithay"
+default-features = false
+features = [ "backend_egl", "backend_winit", "backend_libinput", "backend_drm_legacy", "backend_drm_gbm", "backend_drm_egl", "backend_udev", "backend_session", "backend_session_logind"]
+
+[dependencies.flutter-engine]
+path = "../../flutter-rs/flutter-engine"
