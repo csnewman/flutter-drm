@@ -18,7 +18,7 @@ pub struct FlutterDrmManager {
 impl FlutterDrmManager {
     pub fn new() -> Self {
         Self {
-            event_loop: EventLoop::<()>::new().unwrap()
+            event_loop: EventLoop::<()>::new().unwrap(),
         }
     }
 

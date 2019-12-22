@@ -73,8 +73,8 @@ impl FlutterEngineHandler for SmithayFlutterHandler {
 
     fn get_texture_frame(
         &self,
-        texture_id: i64,
-        size: (usize, usize),
+        _texture_id: i64,
+        _size: (usize, usize),
     ) -> Option<ExternalTextureFrame> {
         unimplemented!()
     }

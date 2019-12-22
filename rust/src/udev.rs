@@ -4,8 +4,8 @@ use smithay::backend::drm::legacy::LegacyDrmDevice;
 use smithay::backend::drm::{device_bind, Device, DeviceHandler, Surface};
 use smithay::backend::egl::EGLContext;
 use smithay::backend::libinput::{libinput_bind, LibinputInputBackend, LibinputSessionInterface};
-use smithay::backend::session::auto::{auto_session_bind, AutoSession, AutoSessionNotifier, AutoId, BoundAutoSession};
-use smithay::backend::session::{notify_multiplexer, AsSessionObserver, Session, SessionNotifier, Id};
+use smithay::backend::session::auto::{auto_session_bind, AutoId, AutoSession, BoundAutoSession};
+use smithay::backend::session::{notify_multiplexer, AsSessionObserver, Session, SessionNotifier};
 use smithay::backend::udev::{udev_backend_bind, UdevBackend, UdevHandler};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -13,12 +13,12 @@ use std::io::Error as IoError;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+
 use std::sync::Arc;
 
 use smithay::reexports::calloop::{
     generic::{EventedFd, Generic},
-    EventLoop, LoopHandle, Source,
+    LoopHandle, Source,
 };
 
 use smithay::reexports::{
@@ -36,7 +36,7 @@ use log::{error, info};
 use crate::egl_util::{WrappedContext, WrappedSurface};
 
 use crate::output::{FlutterOutput, FlutterOutputBackend};
-use crate::{FlutterDrmManager, udev};
+use crate::FlutterDrmManager;
 
 pub struct SessionFd(RawFd);
 impl AsRawFd for SessionFd {
@@ -99,11 +99,11 @@ pub struct UdevOutputManager<S: SessionNotifier + 'static> {
     libinput_session_id: AutoId,
     libinput_event_source: Source<Generic<EventedFd<LibinputInputBackend>>>,
     session_event_source: BoundAutoSession,
-    udev_event_source: Source<Generic<EventedFd<UdevBackend<UdevHandlerImpl<S, ()>>>>>
+    udev_event_source: Source<Generic<EventedFd<UdevBackend<UdevHandlerImpl<S, ()>>>>>,
 }
 
 impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
-    pub fn new(manager: &FlutterDrmManager) -> UdevOutputManager<impl SessionNotifier + 'static>  {
+    pub fn new(manager: &FlutterDrmManager) -> UdevOutputManager<impl SessionNotifier + 'static> {
         // Init session
         let (session, mut notifier) = AutoSession::new(None).ok_or(()).unwrap();
         let (udev_observer, udev_notifier) = notify_multiplexer();
@@ -135,8 +135,8 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
             seat.clone(),
             None,
         )
-            .map_err(|_| ())
-            .unwrap();
+        .map_err(|_| ())
+        .unwrap();
 
         // Initialize libinput backend
         let mut libinput_context = Libinput::new_from_udev::<LibinputSessionInterface<AutoSession>>(
@@ -145,7 +145,7 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
         );
         let libinput_session_id = notifier.register(libinput_context.observer());
         libinput_context.udev_assign_seat(&seat).unwrap();
-        let mut libinput_backend = LibinputInputBackend::new(libinput_context, None);
+        let libinput_backend = LibinputInputBackend::new(libinput_context, None);
         //    libinput_backend.set_handler(AnvilInputHandler::new_with_session(
         //        None,
         //        pointer,
@@ -189,8 +189,6 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
         self.udev_event_source.remove();
     }
 }
-
-
 
 struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
     session: AutoSession,
@@ -304,7 +302,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandler for UdevHandlerImpl<S, Data>
         }
     }
 
-    fn device_changed(&mut self, device: dev_t) {
+    fn device_changed(&mut self, _device: dev_t) {
         //quick and dirty, just re-init all backends
         //        if let Some((_, ref mut evt_source, ref backends)) = self.backends.get_mut(&device) {
         //            let source = evt_source.clone_inner();
@@ -320,7 +318,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandler for UdevHandlerImpl<S, Data>
         error!("Device change not implemented");
     }
 
-    fn device_removed(&mut self, device: dev_t) {
+    fn device_removed(&mut self, _device: dev_t) {
         error!("Device remove not implemented");
 
         // drop the backends on this side
@@ -354,7 +352,7 @@ impl DeviceHandler for DrmHandlerImpl {
     type Device = RenderDevice;
 
     fn vblank(&mut self, crtc: crtc::Handle) {
-        if let Some(engine) = self.backends.borrow().get(&crtc) {
+        if let Some(_engine) = self.backends.borrow().get(&crtc) {
             info!("vblank");
             // TODO: Bad solution...
             //            engine.render_runner.execute_tasks().unwrap();

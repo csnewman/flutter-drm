@@ -34,7 +34,7 @@ unsafe impl Send for WinitOutputBackend {}
 
 pub fn new_winit() {
     let mut event_loop = EventLoop::<()>::new().unwrap();
-    let signal = event_loop.get_signal();
+    let _signal = event_loop.get_signal();
 
     // ------------
 
@@ -56,7 +56,7 @@ pub fn new_winit() {
     }
 
     let backend = Arc::new(WinitOutputBackend { graphics });
-    let output = FlutterOutput::new(backend.clone() as _);
+    let _output = FlutterOutput::new(backend.clone() as _);
 
     let running = Arc::new(AtomicBool::new(true));
     while running.load(Ordering::SeqCst) {
