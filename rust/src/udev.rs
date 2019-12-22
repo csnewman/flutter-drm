@@ -4,8 +4,8 @@ use smithay::backend::drm::legacy::LegacyDrmDevice;
 use smithay::backend::drm::{device_bind, Device, DeviceHandler, Surface};
 use smithay::backend::egl::EGLContext;
 use smithay::backend::libinput::{libinput_bind, LibinputInputBackend, LibinputSessionInterface};
-use smithay::backend::session::auto::{auto_session_bind, AutoSession};
-use smithay::backend::session::{notify_multiplexer, AsSessionObserver, Session, SessionNotifier};
+use smithay::backend::session::auto::{auto_session_bind, AutoSession, AutoSessionNotifier, AutoId, BoundAutoSession};
+use smithay::backend::session::{notify_multiplexer, AsSessionObserver, Session, SessionNotifier, Id};
 use smithay::backend::udev::{udev_backend_bind, UdevBackend, UdevHandler};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -36,6 +36,7 @@ use log::{error, info};
 use crate::egl_util::{WrappedContext, WrappedSurface};
 
 use crate::output::{FlutterOutput, FlutterOutputBackend};
+use crate::{FlutterDrmManager, udev};
 
 pub struct SessionFd(RawFd);
 impl AsRawFd for SessionFd {
@@ -90,96 +91,106 @@ impl EngineInstance {
     }
 }
 
-pub fn new_udev() {
-    let mut event_loop = EventLoop::<()>::new().unwrap();
-    let signal = event_loop.get_signal();
+pub struct UdevOutputManager<S: SessionNotifier + 'static> {
+    session: AutoSession,
+    udev_session_id: AutoId,
+    context: ::smithay::reexports::udev::Context,
+    seat: String,
+    libinput_session_id: AutoId,
+    libinput_event_source: Source<Generic<EventedFd<LibinputInputBackend>>>,
+    session_event_source: BoundAutoSession,
+    udev_event_source: Source<Generic<EventedFd<UdevBackend<UdevHandlerImpl<S, ()>>>>>
+}
 
-    // ------------
+impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
+    pub fn new(manager: &FlutterDrmManager) -> UdevOutputManager<impl SessionNotifier + 'static>  {
+        // Init session
+        let (session, mut notifier) = AutoSession::new(None).ok_or(()).unwrap();
+        let (udev_observer, udev_notifier) = notify_multiplexer();
+        let udev_session_id = notifier.register(udev_observer);
 
-    // Init session
-    let (session, mut notifier) = AutoSession::new(None).ok_or(()).unwrap();
-    let (udev_observer, udev_notifier) = notify_multiplexer();
-    let udev_session_id = notifier.register(udev_observer);
+        // Initialize the udev backend
+        let context = ::smithay::reexports::udev::Context::new()
+            .map_err(|_| ())
+            .unwrap();
+        let seat = session.seat();
 
-    // Initialize the udev backend
-    let context = ::smithay::reexports::udev::Context::new()
-        .map_err(|_| ())
-        .unwrap();
-    let seat = session.seat();
+        // TODO: Find primary gpu
+        //    let primary_gpu = primary_gpu(&context, &seat).unwrap_or_default();
+        let primary_gpu = Some(PathBuf::from("/dev/dri/card0".to_string()));
 
-    //    let primary_gpu = primary_gpu(&context, &seat).unwrap_or_default();
-    let primary_gpu = Some(PathBuf::from("/dev/dri/card0".to_string()));
+        //    if let None = primary_gpu {
+        //        panic!("No primary gpu detected");
+        //    }
 
-    //    if let None = primary_gpu {
-    //        panic!("No primary gpu detected");
-    //    }
+        let udev_backend = UdevBackend::new(
+            &context,
+            UdevHandlerImpl {
+                session: session.clone(),
+                backends: HashMap::new(),
+                primary_gpu,
+                loop_handle: manager.event_loop.handle(),
+                notifier: udev_notifier,
+            },
+            seat.clone(),
+            None,
+        )
+            .map_err(|_| ())
+            .unwrap();
 
-    let udev_backend = UdevBackend::new(
-        &context,
-        UdevHandlerImpl {
-            session: session.clone(),
-            backends: HashMap::new(),
-            primary_gpu,
-            loop_handle: event_loop.handle(),
-            notifier: udev_notifier,
-        },
-        seat.clone(),
-        None,
-    )
-    .map_err(|_| ())
-    .unwrap();
+        // Initialize libinput backend
+        let mut libinput_context = Libinput::new_from_udev::<LibinputSessionInterface<AutoSession>>(
+            session.clone().into(),
+            &context,
+        );
+        let libinput_session_id = notifier.register(libinput_context.observer());
+        libinput_context.udev_assign_seat(&seat).unwrap();
+        let mut libinput_backend = LibinputInputBackend::new(libinput_context, None);
+        //    libinput_backend.set_handler(AnvilInputHandler::new_with_session(
+        //        None,
+        //        pointer,
+        //        keyboard,
+        //        window_map.clone(),
+        //        (w, h),
+        //        running.clone(),
+        //        pointer_location,
+        //        session,
+        //    ));
 
-    // Initialize libinput backend
-    let mut libinput_context = Libinput::new_from_udev::<LibinputSessionInterface<AutoSession>>(
-        session.clone().into(),
-        &context,
-    );
-    let libinput_session_id = notifier.register(libinput_context.observer());
-    libinput_context.udev_assign_seat(&seat).unwrap();
-    let mut libinput_backend = LibinputInputBackend::new(libinput_context, None);
-    //    libinput_backend.set_handler(AnvilInputHandler::new_with_session(
-    //        None,
-    //        pointer,
-    //        keyboard,
-    //        window_map.clone(),
-    //        (w, h),
-    //        running.clone(),
-    //        pointer_location,
-    //        session,
-    //    ));
+        // Bind all our objects that get driven by the event loop
+        let libinput_event_source = libinput_bind(libinput_backend, manager.event_loop.handle())
+            .map_err(|e| -> IoError { e.into() })
+            .unwrap();
+        let session_event_source = auto_session_bind(notifier, &manager.event_loop.handle())
+            .map_err(|(e, _)| e)
+            .unwrap();
+        let udev_event_source = udev_backend_bind(udev_backend, &manager.event_loop.handle())
+            .map_err(|e| -> IoError { e.into() })
+            .unwrap();
 
-    // Bind all our objects that get driven by the event loop
-    let libinput_event_source = libinput_bind(libinput_backend, event_loop.handle())
-        .map_err(|e| -> IoError { e.into() })
-        .unwrap();
-    let session_event_source = auto_session_bind(notifier, &event_loop.handle())
-        .map_err(|(e, _)| e)
-        .unwrap();
-    let udev_event_source = udev_backend_bind(udev_backend, &event_loop.handle())
-        .map_err(|e| -> IoError { e.into() })
-        .unwrap();
-
-    let running = Arc::new(AtomicBool::new(true));
-
-    while running.load(Ordering::SeqCst) {
-        info!("Main thread working");
-        if event_loop
-            .dispatch(Some(::std::time::Duration::from_millis(16)), &mut ())
-            .is_err()
-        {
-            running.store(false, Ordering::SeqCst);
+        UdevOutputManager {
+            session,
+            udev_session_id,
+            context,
+            seat,
+            libinput_session_id,
+            libinput_event_source,
+            session_event_source,
+            udev_event_source,
         }
     }
 
-    info!("Main thread dones");
+    pub fn cleanup(self) {
+        let mut notifier = self.session_event_source.unbind();
+        notifier.unregister(self.libinput_session_id);
+        notifier.unregister(self.udev_session_id);
 
-    let mut notifier = session_event_source.unbind();
-    notifier.unregister(libinput_session_id);
-    notifier.unregister(udev_session_id);
-
-    libinput_event_source.remove();
-    udev_event_source.remove();
+        self.libinput_event_source.remove();
+        self.udev_event_source.remove();
+    }
 }
+
+
 
 struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
     session: AutoSession,
@@ -212,7 +223,8 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
 
         let mut backends = HashMap::new();
 
-        // very naive way of finding good crtc/encoder/connector combinations. This problem is np-complete
+        // very naive way of finding good crtc/encoder/connector combin
+        // ations. This problem is np-complete
         for connector_info in connector_infos {
             let encoder_infos = connector_info
                 .encoders()
