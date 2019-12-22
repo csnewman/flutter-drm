@@ -1,21 +1,21 @@
 use crate::egl_util::{WrappedContext, WrappedDisplay};
+use async_std::task;
 use flutter_engine::ffi::ExternalTextureFrame;
 use flutter_engine::FlutterEngineHandler;
+use futures_task::FutureObj;
 use std::future::Future;
 use std::os::raw::c_void;
 use std::sync::Weak;
-//use smithay::reexports::calloop::LoopSignal;
-use async_std::task;
-use futures_task::FutureObj;
 
 use crate::output::FlutterOutputBackend;
+use crossbeam::sync::Unparker;
 use smithay::backend::egl::ffi;
 
 pub struct SmithayFlutterHandler {
     pub backend: Weak<dyn FlutterOutputBackend>,
     pub display: WrappedDisplay,
     pub resource_context: WrappedContext,
-    //    pub signal: LoopSignal,
+    pub unparker: Unparker,
 }
 
 unsafe impl Send for SmithayFlutterHandler {}
@@ -64,7 +64,7 @@ impl FlutterEngineHandler for SmithayFlutterHandler {
     }
 
     fn wake_platform_thread(&self) {
-        //        self.signal.wakeup()
+        self.unparker.unpark();
     }
 
     fn run_in_background(&self, func: Box<dyn Future<Output = ()> + Send + 'static>) {

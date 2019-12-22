@@ -1,5 +1,6 @@
 use crate::egl_util::{WrappedContext, WrappedDisplay};
 use crate::handler::SmithayFlutterHandler;
+use crossbeam::sync::Parker;
 use flutter_engine::FlutterEngine;
 use log::debug;
 use std::panic::AssertUnwindSafe;
@@ -32,7 +33,7 @@ impl Clone for FlutterOutput {
     }
 }
 
-fn create_output(backend: Arc<dyn FlutterOutputBackend + Send + Sync>) -> FlutterOutput {
+fn create_output(backend: Arc<dyn FlutterOutputBackend + Send + Sync>) -> (Parker, FlutterOutput) {
     let (resource_context, display) = unsafe {
         backend.make_current().expect("Invalid backend context");
 
@@ -42,22 +43,29 @@ fn create_output(backend: Arc<dyn FlutterOutputBackend + Send + Sync>) -> Flutte
         (resource_context, display)
     };
 
+    let parker = Parker::new();
+    let unparker = parker.unparker().clone();
+
     let engine_handler = Arc::new(SmithayFlutterHandler {
         backend: Arc::downgrade(&backend) as _,
         display,
         resource_context,
+        unparker: unparker.clone(),
     });
 
     let engine = FlutterEngine::new(Arc::downgrade(&engine_handler) as _);
 
-    FlutterOutput {
-        engine,
-        engine_handler,
-        backend,
-    }
+    (
+        parker,
+        FlutterOutput {
+            engine,
+            engine_handler,
+            backend,
+        },
+    )
 }
 
-fn run_output(output: FlutterOutput) {
+fn run_output(parker: Parker, output: FlutterOutput) {
     let (width, height) = output.backend.get_framebuffer_dimensions();
 
     output
@@ -74,20 +82,9 @@ fn run_output(output: FlutterOutput) {
         .send_window_metrics_event(width as i32, height as i32, (height as f64) / 1080.0);
 
     let running = Arc::new(AtomicBool::new(true));
-
     while running.load(Ordering::SeqCst) {
-        //                input.dispatch_new_events().unwrap();
-
         output.engine.execute_platform_tasks();
-
-        thread::sleep(Duration::from_secs(1));
-
-        //                if event_loop
-        //                    .dispatch(Some(::std::time::Duration::from_millis(16)), &mut ())
-        //                    .is_err()
-        //                {
-        //                    running.store(false, Ordering::SeqCst);
-        //                }
+        parker.park();
     }
 }
 
@@ -100,10 +97,10 @@ impl FlutterOutput {
             let panic_sender = send.clone();
             let mut has_sent = false;
             let result = panic::catch_unwind(AssertUnwindSafe(move || {
-                let output = create_output(backend);
+                let (parker, output) = create_output(backend);
                 send.send(Ok(output.clone())).unwrap();
                 has_sent = true;
-                run_output(output);
+                run_output(parker, output);
             }));
             if let Err(err) = result {
                 if has_sent {

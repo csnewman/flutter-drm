@@ -12,6 +12,7 @@ winit = "*"
 async-std = "1.2"
 futures-task = "0.3.1"
 parking_lot = "^0.10.0"
+crossbeam = "0.7"
 
 [dependencies.smithay]
 path = "../../smithay"
