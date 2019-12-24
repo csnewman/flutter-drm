@@ -75,7 +75,7 @@ impl FlutterOutputBackend for DrmOutputBackend {
 }
 
 struct EngineInstance {
-    output: FlutterOutput,
+    output: FlutterOutput<DrmOutputBackend>,
     backend: Arc<DrmOutputBackend>,
 }
 
@@ -354,8 +354,6 @@ impl DeviceHandler for DrmHandlerImpl {
     fn vblank(&mut self, crtc: crtc::Handle) {
         if let Some(_engine) = self.backends.borrow().get(&crtc) {
             info!("vblank");
-            // TODO: Bad solution...
-            //            engine.render_runner.execute_tasks().unwrap();
         }
     }
 

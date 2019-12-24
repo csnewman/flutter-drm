@@ -1,17 +1,26 @@
 use crate::egl_util::WrappedDisplay;
-use ::winit::{dpi::LogicalSize, WindowBuilder};
 use log::debug;
 use smithay::backend::graphics::gl::GLGraphicsBackend;
 use smithay::backend::winit;
 use std::sync::Arc;
 
 use crate::output::{FlutterOutput, FlutterOutputBackend};
+use crate::FlutterDrmManager;
 use smithay::backend::input::InputBackend;
-use smithay::backend::winit::WinitGraphicsBackend;
+use smithay::backend::winit::{
+    WinitEventsHandler, WinitGraphicsBackend, WinitInputBackend, WinitInputError,
+};
 use smithay::reexports::calloop::EventLoop;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-struct WinitOutputBackend {
+pub use ::winit::{dpi::LogicalSize, dpi::PhysicalSize, WindowBuilder};
+
+use flutter_engine::FlutterEngine;
+use log::info;
+use std::thread;
+use std::time::Duration;
+
+pub struct WinitOutputBackend {
     graphics: WinitGraphicsBackend,
 }
 
@@ -32,41 +41,46 @@ impl FlutterOutputBackend for WinitOutputBackend {
 unsafe impl Sync for WinitOutputBackend {}
 unsafe impl Send for WinitOutputBackend {}
 
-pub fn new_winit() {
-    let mut event_loop = EventLoop::<()>::new().unwrap();
-    let _signal = event_loop.get_signal();
+struct InputWrapper(WinitInputBackend);
+unsafe impl Send for InputWrapper {}
 
-    // ------------
+pub struct WinitOutputManager {}
 
-    debug!("Creating window");
-    let (graphics, mut input) = winit::init_from_builder(
-        WindowBuilder::new()
-            .with_dimensions(LogicalSize::new(1280.0 / 1.5, 800.0 / 1.5))
-            .with_resizable(false)
-            .with_title("Flutter Compositor")
-            .with_visibility(true),
-        None,
-    )
-    .unwrap();
-
-    // Winit leaves the window bound
-    unsafe {
-        let display = WrappedDisplay::get_current();
-        display.clear_current();
+impl WinitOutputManager {
+    pub fn new(manager: &FlutterDrmManager) -> Self {
+        Self {}
     }
 
-    let backend = Arc::new(WinitOutputBackend { graphics });
-    let _output = FlutterOutput::new(backend.clone() as _);
+    pub fn create_window(&self, builder: WindowBuilder) -> FlutterOutput<WinitOutputBackend> {
+        debug!("Creating window");
+        let (graphics, mut input) = winit::init_from_builder(builder, None).unwrap();
 
-    let running = Arc::new(AtomicBool::new(true));
-    while running.load(Ordering::SeqCst) {
-        input.dispatch_new_events().unwrap();
-
-        if event_loop
-            .dispatch(Some(::std::time::Duration::from_millis(16)), &mut ())
-            .is_err()
-        {
-            running.store(false, Ordering::SeqCst);
+        // Winit leaves the window bound
+        unsafe {
+            let display = WrappedDisplay::get_current();
+            display.clear_current();
         }
+
+        let backend = Arc::new(WinitOutputBackend { graphics });
+        let output = FlutterOutput::new(backend);
+        
+        let input = InputWrapper(input);
+        thread::spawn(move || {
+            let mut input = input.0;
+            let mut running = true;
+
+            while running {
+                match input.dispatch_new_events() {
+                    Ok(_) => {}
+                    Err(WinitInputError::WindowClosed) => {
+                        running = false;
+                        // TODO: Signal
+                    }
+                }
+                thread::sleep(Duration::from_millis(16));
+            }
+        });
+
+        output
     }
 }

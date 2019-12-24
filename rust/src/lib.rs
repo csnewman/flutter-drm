@@ -4,10 +4,7 @@ pub mod output;
 pub mod udev;
 pub mod winit;
 
-use smithay::reexports::calloop::{
-    generic::{EventedFd, Generic},
-    EventLoop, LoopHandle, Source,
-};
+use smithay::reexports::calloop::EventLoop;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 

@@ -17,13 +17,13 @@ pub trait FlutterOutputBackend {
     fn get_framebuffer_dimensions(&self) -> (u32, u32);
 }
 
-pub struct FlutterOutput {
+pub struct FlutterOutput<B: FlutterOutputBackend + Send + Sync + 'static> {
     engine: FlutterEngine,
     engine_handler: Arc<SmithayFlutterHandler>,
-    backend: Arc<dyn FlutterOutputBackend + Send + Sync>,
+    backend: Arc<B>,
 }
 
-impl Clone for FlutterOutput {
+impl<B: FlutterOutputBackend + Send + Sync + 'static> Clone for FlutterOutput<B> {
     fn clone(&self) -> Self {
         Self {
             engine: self.engine.clone(),
@@ -33,7 +33,10 @@ impl Clone for FlutterOutput {
     }
 }
 
-fn create_output(backend: Arc<dyn FlutterOutputBackend + Send + Sync>) -> (Parker, FlutterOutput) {
+fn create_output<B>(backend: Arc<B>) -> (Parker, FlutterOutput<B>)
+where
+    B: FlutterOutputBackend + Send + Sync + 'static,
+{
     let (resource_context, display) = unsafe {
         backend.make_current().expect("Invalid backend context");
 
@@ -65,7 +68,10 @@ fn create_output(backend: Arc<dyn FlutterOutputBackend + Send + Sync>) -> (Parke
     )
 }
 
-fn run_output(parker: Parker, output: FlutterOutput) {
+fn run_output<B>(parker: Parker, output: FlutterOutput<B>)
+where
+    B: FlutterOutputBackend + Send + Sync + 'static,
+{
     let (width, height) = output.backend.get_framebuffer_dimensions();
 
     output
@@ -88,8 +94,8 @@ fn run_output(parker: Parker, output: FlutterOutput) {
     }
 }
 
-impl FlutterOutput {
-    pub(crate) fn new(backend: Arc<dyn FlutterOutputBackend + Send + Sync>) -> Self {
+impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
+    pub(crate) fn new(backend: Arc<B>) -> Self {
         debug!("Creating new flutter output");
 
         let (send, recv) = mpsc::channel();
@@ -115,5 +121,9 @@ impl FlutterOutput {
             Ok(output) => output,
             Err(err) => panic::resume_unwind(err),
         }
+    }
+
+    pub fn engine(&self) -> FlutterEngine {
+        self.engine.clone()
     }
 }
