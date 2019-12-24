@@ -63,7 +63,11 @@ impl WinitOutputManager {
 
         let backend = Arc::new(WinitOutputBackend { graphics });
         let output = FlutterOutput::new(backend);
-        
+
+        input.set_events_handler(WinitOutputEventsHandler {
+            engine: output.engine(),
+        });
+
         let input = InputWrapper(input);
         thread::spawn(move || {
             let mut input = input.0;
@@ -83,4 +87,20 @@ impl WinitOutputManager {
 
         output
     }
+}
+
+struct WinitOutputEventsHandler {
+    engine: FlutterEngine,
+}
+
+impl WinitEventsHandler for WinitOutputEventsHandler {
+    fn resized(&mut self, size: (f64, f64), scale: f64) {
+        debug!("Window resized: {:?}x{}", size, scale);
+        self.engine
+            .send_window_metrics_event(size.0 as i32, size.1 as i32, 1.0);
+    }
+
+    fn focus_changed(&mut self, focused: bool) {}
+
+    fn refresh(&mut self) {}
 }

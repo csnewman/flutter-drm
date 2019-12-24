@@ -85,7 +85,7 @@ where
 
     output
         .engine
-        .send_window_metrics_event(width as i32, height as i32, (height as f64) / 1080.0);
+        .send_window_metrics_event(width as i32, height as i32, 1.0);
 
     let running = Arc::new(AtomicBool::new(true));
     while running.load(Ordering::SeqCst) {
