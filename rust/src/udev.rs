@@ -31,7 +31,7 @@ use smithay::reexports::{
     nix::{fcntl::OFlag, sys::stat::dev_t},
 };
 
-use log::{error, info};
+use log::{error, info, trace};
 
 use crate::egl_util::{WrappedContext, WrappedSurface};
 
@@ -200,7 +200,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
         &self,
         device: &mut RenderDevice,
     ) -> HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>> {
-        // Get a set of all modesetting resource handles (excluding planes):
+        // Get a set of all modesetting resource handles (excluding planes)
         let res_handles = device.resource_handles().unwrap();
 
         // Use first connected connector
@@ -214,8 +214,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
 
         let mut backends = HashMap::new();
 
-        // very naive way of finding good crtc/encoder/connector combin
-        // ations. This problem is np-complete
+        // very naive way of finding good crtc/encoder/connector combinations.
         for connector_info in connector_infos {
             let encoder_infos = connector_info
                 .encoders()
@@ -285,8 +284,6 @@ impl<S: SessionNotifier, Data: 'static> UdevHandler for UdevHandlerImpl<S, Data>
             let backends = Rc::new(RefCell::new(self.scan_connectors(&mut device)));
 
             // Set the handler.
-            // Note: if you replicate this (very simple) structure, it is rather easy
-            // to introduce reference cycles with Rc. Be sure about your drop order
             device.set_handler(DrmHandlerImpl {
                 backends: backends.clone(),
             });
@@ -353,7 +350,7 @@ impl DeviceHandler for DrmHandlerImpl {
 
     fn vblank(&mut self, crtc: crtc::Handle) {
         if let Some(_engine) = self.backends.borrow().get(&crtc) {
-            info!("vblank");
+            trace!("vblank");
         }
     }
 
