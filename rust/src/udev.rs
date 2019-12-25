@@ -74,26 +74,6 @@ impl FlutterOutputBackend for DrmOutputBackend {
     }
 }
 
-struct EngineInstance {
-    output: FlutterOutput<DrmOutputBackend>,
-    backend: Arc<DrmOutputBackend>,
-}
-
-impl EngineInstance {
-    pub fn new(surface: WrappedRenderSurface) -> Self {
-        //        info!("Render thread id: {:?}", thread::current().id());
-
-        let backend = Arc::new(DrmOutputBackend { surface });
-
-        let output = FlutterOutput::new(
-            backend.clone() as _,
-            FlutterEngineOptions::new("".to_string(), "".to_string(), Vec::new()),
-        );
-
-        Self { output, backend }
-    }
-}
-
 pub struct UdevOutputManager<S: SessionNotifier + 'static> {
     session: AutoSession,
     udev_session_id: AutoId,
@@ -200,7 +180,7 @@ struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
         (
             S::Id,
             Source<Generic<EventedFd<RenderDevice>>>,
-            Rc<RefCell<HashMap<crtc::Handle, EngineInstance>>>,
+            Rc<RefCell<HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>>>>,
         ),
     >,
     primary_gpu: Option<PathBuf>,
@@ -209,7 +189,9 @@ struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
 }
 
 impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
-    pub fn scan_connectors(device: &mut RenderDevice) -> HashMap<crtc::Handle, EngineInstance> {
+    pub fn scan_connectors(
+        device: &mut RenderDevice,
+    ) -> HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>> {
         // Get a set of all modesetting resource handles (excluding planes):
         let res_handles = device.resource_handles().unwrap();
 
@@ -238,20 +220,28 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
                         let info = device.resource_info::<crtc::Info>(crtc);
                         info!("CRTC Info: {:?}", info);
 
+                        // Create new egl context for rendering
                         let device_context = device.get_context();
                         let raw_context = device_context.get_raw_context();
                         let raw_display = device_context.get_raw_display();
-
-                        let surface = EGLContext::borrow_mut(&device_context)
-                            .create_surface(crtc)
-                            .unwrap();
                         let render_context = unsafe {
                             WrappedContext::create_context_dir(*raw_context, *raw_display)
                         };
+
+                        // Create new egl surface to render to
+                        let surface = EGLContext::borrow_mut(&device_context)
+                            .create_surface(crtc)
+                            .unwrap();
                         let surface = render_context.create_surface(surface);
 
-                        let inst = EngineInstance::new(surface);
-                        backends.insert(crtc, inst);
+                        // Create output
+                        let backend = Arc::new(DrmOutputBackend { surface });
+                        let output = FlutterOutput::new(
+                            backend.clone() as _,
+                            FlutterEngineOptions::new("".to_string(), "".to_string(), Vec::new()),
+                        );
+
+                        backends.insert(crtc, output);
                         break;
                     }
                 }
@@ -348,7 +338,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandler for UdevHandlerImpl<S, Data>
 }
 
 pub struct DrmHandlerImpl {
-    backends: Rc<RefCell<HashMap<crtc::Handle, EngineInstance>>>,
+    backends: Rc<RefCell<HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>>>>,
 }
 
 impl DeviceHandler for DrmHandlerImpl {
