@@ -91,85 +91,86 @@ pub struct UdevOutputManager<S: SessionNotifier + 'static> {
     udev_event_source: Source<Generic<EventedFd<UdevBackend<UdevHandlerImpl<S, ()>>>>>,
 }
 
-impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
-    pub fn new(
-        manager: &FlutterDrmManager,
-        handler: Arc<dyn UdevOutputManagerHandler>,
-    ) -> UdevOutputManager<impl SessionNotifier + 'static> {
-        // Init session
-        let (session, mut notifier) = AutoSession::new(None).ok_or(()).unwrap();
-        let (udev_observer, udev_notifier) = notify_multiplexer();
-        let udev_session_id = notifier.register(udev_observer);
+pub fn new_udev(
+    manager: &FlutterDrmManager,
+    handler: Arc<dyn UdevOutputManagerHandler>,
+) -> UdevOutputManager<impl SessionNotifier + 'static> {
+    // Init session
+    let (session, mut notifier) = AutoSession::new(None).ok_or(()).unwrap();
+    let (udev_observer, udev_notifier) = notify_multiplexer();
+    let udev_session_id = notifier.register(udev_observer);
 
-        // Initialize the udev backend
-        let context = ::smithay::reexports::udev::Context::new()
-            .map_err(|_| ())
-            .unwrap();
-        let seat = session.seat();
-
-        // TODO: Find primary gpu
-        //    let primary_gpu = primary_gpu(&context, &seat).unwrap_or_default();
-        //    if let None = primary_gpu {
-        //        panic!("No primary gpu detected");
-        //    }
-
-        let udev_backend = UdevBackend::new(
-            &context,
-            UdevHandlerImpl {
-                handler,
-                session: session.clone(),
-                backends: HashMap::new(),
-                loop_handle: manager.event_loop.handle(),
-                notifier: udev_notifier,
-            },
-            seat.clone(),
-            None,
-        )
+    // Initialize the udev backend
+    let context = ::smithay::reexports::udev::Context::new()
         .map_err(|_| ())
         .unwrap();
+    let seat = session.seat();
 
-        // Initialize libinput backend
-        let mut libinput_context = Libinput::new_from_udev::<LibinputSessionInterface<AutoSession>>(
-            session.clone().into(),
-            &context,
-        );
-        let libinput_session_id = notifier.register(libinput_context.observer());
-        libinput_context.udev_assign_seat(&seat).unwrap();
-        let libinput_backend = LibinputInputBackend::new(libinput_context, None);
-        //    libinput_backend.set_handler(AnvilInputHandler::new_with_session(
-        //        None,
-        //        pointer,
-        //        keyboard,
-        //        window_map.clone(),
-        //        (w, h),
-        //        running.clone(),
-        //        pointer_location,
-        //        session,
-        //    ));
+    // TODO: Find primary gpu
+    //    let primary_gpu = primary_gpu(&context, &seat).unwrap_or_default();
+    //    if let None = primary_gpu {
+    //        panic!("No primary gpu detected");
+    //    }
 
-        // Bind all our objects that get driven by the event loop
-        let libinput_event_source = libinput_bind(libinput_backend, manager.event_loop.handle())
-            .map_err(|e| -> IoError { e.into() })
-            .unwrap();
-        let session_event_source = auto_session_bind(notifier, &manager.event_loop.handle())
-            .map_err(|(e, _)| e)
-            .unwrap();
-        let udev_event_source = udev_backend_bind(udev_backend, &manager.event_loop.handle())
-            .map_err(|e| -> IoError { e.into() })
-            .unwrap();
+    let udev_backend = UdevBackend::new(
+        &context,
+        UdevHandlerImpl {
+            handler,
+            session: session.clone(),
+            backends: HashMap::new(),
+            loop_handle: manager.event_loop.handle(),
+            notifier: udev_notifier,
+        },
+        seat.clone(),
+        None,
+    )
+    .map_err(|_| ())
+    .unwrap();
 
-        UdevOutputManager {
-            session,
-            udev_session_id,
-            context,
-            seat,
-            libinput_session_id,
-            libinput_event_source,
-            session_event_source,
-            udev_event_source,
-        }
+    // Initialize libinput backend
+    let mut libinput_context = Libinput::new_from_udev::<LibinputSessionInterface<AutoSession>>(
+        session.clone().into(),
+        &context,
+    );
+    let libinput_session_id = notifier.register(libinput_context.observer());
+    libinput_context.udev_assign_seat(&seat).unwrap();
+    let libinput_backend = LibinputInputBackend::new(libinput_context, None);
+    //    libinput_backend.set_handler(AnvilInputHandler::new_with_session(
+    //        None,
+    //        pointer,
+    //        keyboard,
+    //        window_map.clone(),
+    //        (w, h),
+    //        running.clone(),
+    //        pointer_location,
+    //        session,
+    //    ));
+
+    // Bind all our objects that get driven by the event loop
+    let libinput_event_source = libinput_bind(libinput_backend, manager.event_loop.handle())
+        .map_err(|e| -> IoError { e.into() })
+        .unwrap();
+    let session_event_source = auto_session_bind(notifier, &manager.event_loop.handle())
+        .map_err(|(e, _)| e)
+        .unwrap();
+    let udev_event_source = udev_backend_bind(udev_backend, &manager.event_loop.handle())
+        .map_err(|e| -> IoError { e.into() })
+        .unwrap();
+
+    UdevOutputManager {
+        session,
+        udev_session_id,
+        context,
+        seat,
+        libinput_session_id,
+        libinput_event_source,
+        session_event_source,
+        udev_event_source,
     }
+}
 
+
+impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
     pub fn cleanup(self) {
         let mut notifier = self.session_event_source.unbind();
         notifier.unregister(self.libinput_session_id);
