@@ -74,6 +74,12 @@ impl FlutterOutputBackend for DrmOutputBackend {
     }
 }
 
+pub trait UdevOutputManagerHandler {
+    fn should_use_gpu(&self, path: PathBuf) -> bool;
+
+    fn configure_output(&self) -> Option<FlutterEngineOptions>;
+}
+
 pub struct UdevOutputManager<S: SessionNotifier + 'static> {
     session: AutoSession,
     udev_session_id: AutoId,
@@ -86,7 +92,10 @@ pub struct UdevOutputManager<S: SessionNotifier + 'static> {
 }
 
 impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
-    pub fn new(manager: &FlutterDrmManager) -> UdevOutputManager<impl SessionNotifier + 'static> {
+    pub fn new(
+        manager: &FlutterDrmManager,
+        handler: Arc<dyn UdevOutputManagerHandler>,
+    ) -> UdevOutputManager<impl SessionNotifier + 'static> {
         // Init session
         let (session, mut notifier) = AutoSession::new(None).ok_or(()).unwrap();
         let (udev_observer, udev_notifier) = notify_multiplexer();
@@ -100,8 +109,6 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
 
         // TODO: Find primary gpu
         //    let primary_gpu = primary_gpu(&context, &seat).unwrap_or_default();
-        let primary_gpu = Some(PathBuf::from("/dev/dri/card0".to_string()));
-
         //    if let None = primary_gpu {
         //        panic!("No primary gpu detected");
         //    }
@@ -109,9 +116,9 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
         let udev_backend = UdevBackend::new(
             &context,
             UdevHandlerImpl {
+                handler,
                 session: session.clone(),
                 backends: HashMap::new(),
-                primary_gpu,
                 loop_handle: manager.event_loop.handle(),
                 notifier: udev_notifier,
             },
@@ -174,6 +181,7 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
 }
 
 struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
+    handler: Arc<dyn UdevOutputManagerHandler>,
     session: AutoSession,
     backends: HashMap<
         dev_t,
@@ -183,13 +191,13 @@ struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
             Rc<RefCell<HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>>>>,
         ),
     >,
-    primary_gpu: Option<PathBuf>,
     loop_handle: LoopHandle<Data>,
     notifier: S,
 }
 
 impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
     pub fn scan_connectors(
+        &self,
         device: &mut RenderDevice,
     ) -> HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>> {
         // Get a set of all modesetting resource handles (excluding planes):
@@ -215,10 +223,15 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
                 .flat_map(|encoder_handle| device.resource_info::<EncoderInfo>(*encoder_handle))
                 .collect::<Vec<EncoderInfo>>();
             for encoder_info in encoder_infos {
-                for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
+                'inner: for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
                     if !backends.contains_key(&crtc) {
                         let info = device.resource_info::<crtc::Info>(crtc);
                         info!("CRTC Info: {:?}", info);
+
+                        let options = match self.handler.configure_output() {
+                            Some(opts) => opts,
+                            None => continue 'inner,
+                        };
 
                         // Create new egl context for rendering
                         let device_context = device.get_context();
@@ -236,10 +249,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
 
                         // Create output
                         let backend = Arc::new(DrmOutputBackend { surface });
-                        let output = FlutterOutput::new(
-                            backend.clone() as _,
-                            FlutterEngineOptions::new("".to_string(), "".to_string(), Vec::new()),
-                        );
+                        let output = FlutterOutput::new(backend.clone() as _, options);
 
                         backends.insert(crtc, output);
                         break;
@@ -254,8 +264,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
 
 impl<S: SessionNotifier, Data: 'static> UdevHandler for UdevHandlerImpl<S, Data> {
     fn device_added(&mut self, _device: dev_t, path: PathBuf) {
-        // Only single GPU is supported for now
-        if path.canonicalize().ok() != self.primary_gpu {
+        if !self.handler.should_use_gpu(path.canonicalize().unwrap()) {
             return;
         }
 
@@ -273,9 +282,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandler for UdevHandlerImpl<S, Data>
             .and_then(|drm| GbmDevice::new(drm, None).ok())
             .and_then(|gbm| EglDevice::new(gbm, None).ok())
         {
-            let backends = Rc::new(RefCell::new(UdevHandlerImpl::<S, Data>::scan_connectors(
-                &mut device,
-            )));
+            let backends = Rc::new(RefCell::new(self.scan_connectors(&mut device)));
 
             // Set the handler.
             // Note: if you replicate this (very simple) structure, it is rather easy

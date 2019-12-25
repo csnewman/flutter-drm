@@ -10,13 +10,10 @@ use smithay::backend::input::InputBackend;
 use smithay::backend::winit::{
     WinitEventsHandler, WinitGraphicsBackend, WinitInputBackend, WinitInputError,
 };
-use smithay::reexports::calloop::EventLoop;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use ::winit::{dpi::LogicalSize, dpi::PhysicalSize, WindowBuilder};
 
 use flutter_engine::FlutterEngine;
-use log::info;
 use std::thread;
 use std::time::Duration;
 
