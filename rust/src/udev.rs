@@ -35,7 +35,7 @@ use log::{error, info};
 
 use crate::egl_util::{WrappedContext, WrappedSurface};
 
-use crate::output::{FlutterOutput, FlutterOutputBackend};
+use crate::output::{FlutterEngineOptions, FlutterOutput, FlutterOutputBackend};
 use crate::FlutterDrmManager;
 
 pub struct SessionFd(RawFd);
@@ -85,7 +85,10 @@ impl EngineInstance {
 
         let backend = Arc::new(DrmOutputBackend { surface });
 
-        let output = FlutterOutput::new(backend.clone() as _);
+        let output = FlutterOutput::new(
+            backend.clone() as _,
+            FlutterEngineOptions::new("".to_string(), "".to_string(), Vec::new()),
+        );
 
         Self { output, backend }
     }

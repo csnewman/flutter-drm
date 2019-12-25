@@ -4,7 +4,7 @@ use smithay::backend::graphics::gl::GLGraphicsBackend;
 use smithay::backend::winit;
 use std::sync::Arc;
 
-use crate::output::{FlutterOutput, FlutterOutputBackend};
+use crate::output::{FlutterEngineOptions, FlutterOutput, FlutterOutputBackend};
 use crate::FlutterDrmManager;
 use smithay::backend::input::InputBackend;
 use smithay::backend::winit::{
@@ -51,7 +51,11 @@ impl WinitOutputManager {
         Self {}
     }
 
-    pub fn create_window(&self, builder: WindowBuilder) -> FlutterOutput<WinitOutputBackend> {
+    pub fn create_window(
+        &self,
+        builder: WindowBuilder,
+        options: FlutterEngineOptions,
+    ) -> FlutterOutput<WinitOutputBackend> {
         debug!("Creating window");
         let (graphics, mut input) = winit::init_from_builder(builder, None).unwrap();
 
@@ -62,7 +66,7 @@ impl WinitOutputManager {
         }
 
         let backend = Arc::new(WinitOutputBackend { graphics });
-        let output = FlutterOutput::new(backend);
+        let output = FlutterOutput::new(backend, options);
 
         input.set_events_handler(WinitOutputEventsHandler {
             engine: output.engine(),

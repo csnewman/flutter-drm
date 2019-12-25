@@ -33,7 +33,10 @@ impl<B: FlutterOutputBackend + Send + Sync + 'static> Clone for FlutterOutput<B>
     }
 }
 
-fn create_output<B>(backend: Arc<B>) -> (Parker, FlutterOutput<B>)
+fn create_output<B>(
+    backend: Arc<B>,
+    options: &mut FlutterEngineOptions,
+) -> (Parker, FlutterOutput<B>)
 where
     B: FlutterOutputBackend + Send + Sync + 'static,
 {
@@ -58,6 +61,10 @@ where
 
     let engine = FlutterEngine::new(Arc::downgrade(&engine_handler) as _);
 
+    if let Some(callback) = options.callback.take() {
+        callback(&engine);
+    }
+
     (
         parker,
         FlutterOutput {
@@ -68,7 +75,7 @@ where
     )
 }
 
-fn run_output<B>(parker: Parker, output: FlutterOutput<B>)
+fn run_output<B>(parker: Parker, output: FlutterOutput<B>, options: &FlutterEngineOptions)
 where
     B: FlutterOutputBackend + Send + Sync + 'static,
 {
@@ -77,9 +84,9 @@ where
     output
         .engine
         .run(
-            "flutter_assets/".to_string(),
-            "icudtl.dat".to_string(),
-            Vec::new(),
+            options.assets_path.clone(),
+            options.icu_data_path.clone(),
+            options.arguments.clone(),
         )
         .expect("Failed to start engine");
 
@@ -95,7 +102,7 @@ where
 }
 
 impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
-    pub(crate) fn new(backend: Arc<B>) -> Self {
+    pub(crate) fn new(backend: Arc<B>, options: FlutterEngineOptions) -> Self {
         debug!("Creating new flutter output");
 
         let (send, recv) = mpsc::channel();
@@ -103,10 +110,11 @@ impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
             let panic_sender = send.clone();
             let mut has_sent = false;
             let result = panic::catch_unwind(AssertUnwindSafe(move || {
-                let (parker, output) = create_output(backend);
+                let mut options = options;
+                let (parker, output) = create_output(backend, &mut options);
                 send.send(Ok(output.clone())).unwrap();
                 has_sent = true;
-                run_output(parker, output);
+                run_output(parker, output, &options);
             }));
             if let Err(err) = result {
                 if has_sent {
@@ -125,5 +133,30 @@ impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
 
     pub fn engine(&self) -> FlutterEngine {
         self.engine.clone()
+    }
+}
+
+pub struct FlutterEngineOptions {
+    pub(crate) assets_path: String,
+    pub(crate) icu_data_path: String,
+    pub(crate) arguments: Vec<String>,
+    pub(crate) callback: Option<Box<dyn FnOnce(&FlutterEngine) + Send>>,
+}
+
+impl FlutterEngineOptions {
+    pub fn new(assets_path: String, icu_data_path: String, arguments: Vec<String>) -> Self {
+        Self {
+            assets_path,
+            icu_data_path,
+            arguments,
+            callback: None,
+        }
+    }
+
+    pub fn set_callback<F>(&mut self, callback: F)
+    where
+        F: FnOnce(&FlutterEngine) -> () + 'static + Send,
+    {
+        self.callback = Some(Box::new(callback));
     }
 }
