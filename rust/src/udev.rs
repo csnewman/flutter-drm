@@ -169,7 +169,6 @@ pub fn new_udev(
     }
 }
 
-
 impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
     pub fn cleanup(self) {
         let mut notifier = self.session_event_source.unbind();

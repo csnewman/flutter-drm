@@ -36,9 +36,11 @@ impl FlutterOutputBackend for WinitOutputBackend {
 }
 
 unsafe impl Sync for WinitOutputBackend {}
+
 unsafe impl Send for WinitOutputBackend {}
 
 struct InputWrapper(WinitInputBackend);
+
 unsafe impl Send for InputWrapper {}
 
 pub struct WinitOutputManager {}
@@ -98,7 +100,7 @@ impl WinitEventsHandler for WinitOutputEventsHandler {
     fn resized(&mut self, size: (f64, f64), scale: f64) {
         debug!("Window resized: {:?}x{}", size, scale);
         self.engine
-            .send_window_metrics_event(size.0 as i32, size.1 as i32, 1.0);
+            .send_window_metrics_event(size.0 as usize, size.1 as usize, 1.0);
     }
 
     fn focus_changed(&mut self, focused: bool) {}

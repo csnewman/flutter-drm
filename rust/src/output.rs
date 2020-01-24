@@ -7,6 +7,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
+use std::path::PathBuf;
 use std::{panic, thread};
 
 pub trait FlutterOutputBackend {
@@ -56,7 +57,7 @@ where
         backend: Arc::downgrade(&backend) as _,
         display,
         resource_context,
-        unparker: unparker.clone(),
+        unparker,
     });
 
     let engine = FlutterEngine::new(Arc::downgrade(&engine_handler) as _);
@@ -83,16 +84,12 @@ where
 
     output
         .engine
-        .run(
-            options.assets_path.clone(),
-            options.icu_data_path.clone(),
-            options.arguments.clone(),
-        )
+        .run(&options.assets_path, &options.arguments)
         .expect("Failed to start engine");
 
     output
         .engine
-        .send_window_metrics_event(width as i32, height as i32, 1.0);
+        .send_window_metrics_event(width as usize, height as usize, 1.0);
 
     let running = Arc::new(AtomicBool::new(true));
     while running.load(Ordering::SeqCst) {
@@ -137,17 +134,15 @@ impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
 }
 
 pub struct FlutterEngineOptions {
-    pub(crate) assets_path: String,
-    pub(crate) icu_data_path: String,
+    pub(crate) assets_path: PathBuf,
     pub(crate) arguments: Vec<String>,
     pub(crate) callback: Option<Box<dyn FnOnce(&FlutterEngine) + Send>>,
 }
 
 impl FlutterEngineOptions {
-    pub fn new(assets_path: String, icu_data_path: String, arguments: Vec<String>) -> Self {
+    pub fn new(assets_path: PathBuf, arguments: Vec<String>) -> Self {
         Self {
             assets_path,
-            icu_data_path,
             arguments,
             callback: None,
         }

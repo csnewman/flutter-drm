@@ -1,12 +1,11 @@
 [package]
-name = "flutter_drm"
+name = "flutter-drm"
 version = "0.1.0"
 authors = ["csnewman"]
 edition = "2018"
 
 [dependencies]
 log = "0.4.6"
-fern = { version = "^0.5", features = ["colored"] }
 chrono = "^0.4"
 winit = "*"
 async-std = "1.2"
