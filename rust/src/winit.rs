@@ -98,9 +98,9 @@ struct WinitOutputEventsHandler {
 
 impl WinitEventsHandler for WinitOutputEventsHandler {
     fn resized(&mut self, size: (f64, f64), scale: f64) {
-        debug!("Window resized: {:?}x{}", size, scale);
-        self.engine
-            .send_window_metrics_event(size.0 as usize, size.1 as usize, 1.0);
+        self.engine.run_on_platform_thread(move |engine| {
+            engine.send_window_metrics_event(size.0 as usize, size.1 as usize, 1.0);
+        });
     }
 
     fn focus_changed(&mut self, focused: bool) {}
