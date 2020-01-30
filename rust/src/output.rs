@@ -60,7 +60,7 @@ where
         unparker,
     });
 
-    let engine = FlutterEngine::new(Arc::downgrade(&engine_handler) as _);
+    let engine = FlutterEngine::new(Arc::downgrade(&engine_handler) as _, options.assets_path.clone());
 
     if let Some(callback) = options.callback.take() {
         callback(&engine);
@@ -84,7 +84,7 @@ where
 
     output
         .engine
-        .run(&options.assets_path, &options.arguments)
+        .run(&options.arguments)
         .expect("Failed to start engine");
 
     output

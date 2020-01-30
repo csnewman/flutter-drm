@@ -1,6 +1,5 @@
 use crate::egl_util::{WrappedContext, WrappedDisplay};
 use async_std::task;
-use flutter_engine::ffi::ExternalTextureFrame;
 use flutter_engine::FlutterEngineHandler;
 use futures_task::FutureObj;
 use std::future::Future;
@@ -69,13 +68,5 @@ impl FlutterEngineHandler for SmithayFlutterHandler {
 
     fn run_in_background(&self, func: Box<dyn Future<Output = ()> + Send + 'static>) {
         task::spawn(FutureObj::new(func));
-    }
-
-    fn get_texture_frame(
-        &self,
-        _texture_id: i64,
-        _size: (usize, usize),
-    ) -> Option<ExternalTextureFrame> {
-        unimplemented!()
     }
 }
