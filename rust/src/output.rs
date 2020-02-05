@@ -7,6 +7,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
+use flutter_plugins::keyevent::KeyEventPlugin;
 use std::path::PathBuf;
 use std::{panic, thread};
 
@@ -60,7 +61,12 @@ where
         unparker,
     });
 
-    let engine = FlutterEngine::new(Arc::downgrade(&engine_handler) as _, options.assets_path.clone());
+    let engine = FlutterEngine::new(
+        Arc::downgrade(&engine_handler) as _,
+        options.assets_path.clone(),
+    );
+
+    engine.add_plugin(KeyEventPlugin::default());
 
     if let Some(callback) = options.callback.take() {
         callback(&engine);

@@ -4,6 +4,8 @@ pub mod output;
 pub mod udev;
 pub mod winit;
 
+use flutter_engine::{FlutterEngine, FlutterEngineWeakRef};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use smithay::reexports::calloop::EventLoop;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -26,6 +28,45 @@ impl FlutterDrmManager {
             if self.event_loop.dispatch(None, &mut ()).is_err() {
                 running.store(false, Ordering::SeqCst);
             }
+        }
+    }
+}
+
+pub struct EngineWeakCollection {
+    engines: Arc<RwLock<Vec<FlutterEngineWeakRef>>>,
+}
+
+impl Clone for EngineWeakCollection {
+    fn clone(&self) -> Self {
+        Self {
+            engines: self.engines.clone(),
+        }
+    }
+}
+
+impl EngineWeakCollection {
+    pub fn add(&self, engine: FlutterEngineWeakRef) {
+        self.engines.write().push(engine);
+    }
+
+    pub fn for_each<F>(&self, func: F)
+    where
+        F: Fn(FlutterEngine),
+    {
+        let engines = self.engines.upgradable_read();
+        let mut dirty = false;
+
+        for engine in engines.iter() {
+            match engine.upgrade() {
+                None => dirty = true,
+                Some(engine) => func(engine),
+            }
+        }
+
+        // We detected some engines failed to upgrade, clear bad references
+        if dirty {
+            let mut engines = RwLockUpgradableReadGuard::upgrade(engines);
+            engines.retain(|e| e.is_valid());
         }
     }
 }

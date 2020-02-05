@@ -11,7 +11,8 @@ winit = "*"
 async-std = "1.2"
 futures-task = "0.3.1"
 parking_lot = "^0.10.0"
-crossbeam = "0.7"
+crossbeam = "0.7.3"
+xkbcommon = "0.4.0"
 
 [dependencies.smithay]
 path = "../../smithay"
@@ -20,3 +21,6 @@ features = [ "backend_egl", "backend_winit", "backend_libinput", "backend_drm_le
 
 [dependencies.flutter-engine]
 path = "../../flutter-rs/flutter-engine"
+
+[dependencies.flutter-plugins]
+path = "../../flutter-rs/flutter-plugins"
