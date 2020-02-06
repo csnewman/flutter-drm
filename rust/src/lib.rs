@@ -1,5 +1,6 @@
 mod egl_util;
 pub(crate) mod handler;
+pub(crate) mod input;
 pub mod output;
 pub mod udev;
 pub mod winit;
@@ -45,6 +46,12 @@ impl Clone for EngineWeakCollection {
 }
 
 impl EngineWeakCollection {
+    pub fn new() -> Self {
+        Self {
+            engines: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
     pub fn add(&self, engine: FlutterEngineWeakRef) {
         self.engines.write().push(engine);
     }

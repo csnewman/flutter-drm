@@ -5,7 +5,7 @@ use smithay::backend::winit;
 use std::sync::Arc;
 
 use crate::output::{FlutterEngineOptions, FlutterOutput, FlutterOutputBackend};
-use crate::FlutterDrmManager;
+use crate::{EngineWeakCollection, FlutterDrmManager};
 use smithay::backend::input::InputBackend;
 use smithay::backend::winit::{
     WinitEventsHandler, WinitGraphicsBackend, WinitInputBackend, WinitInputError,
@@ -13,7 +13,10 @@ use smithay::backend::winit::{
 
 pub use ::winit::{dpi::LogicalSize, dpi::PhysicalSize, WindowBuilder};
 
+use crate::input::keyboard::KeyboardManager;
+use crate::input::winit::WinitInputHandler;
 use flutter_engine::FlutterEngine;
+use parking_lot::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -43,11 +46,19 @@ struct InputWrapper(WinitInputBackend);
 
 unsafe impl Send for InputWrapper {}
 
-pub struct WinitOutputManager {}
+pub struct WinitOutputManager {
+    engines: EngineWeakCollection,
+    keyboard: Arc<Mutex<KeyboardManager>>,
+}
 
 impl WinitOutputManager {
     pub fn new(manager: &FlutterDrmManager) -> Self {
-        Self {}
+        let engines = EngineWeakCollection::new();
+
+        Self {
+            keyboard: Arc::new(Mutex::new(KeyboardManager::new(engines.clone()))),
+            engines,
+        }
     }
 
     pub fn create_window(
@@ -64,12 +75,15 @@ impl WinitOutputManager {
             display.clear_current();
         }
 
+        // Create output
         let backend = Arc::new(WinitOutputBackend { graphics });
         let output = FlutterOutput::new(backend, options);
+        let engine = output.engine();
+        self.engines.add(engine.downgrade());
 
-        input.set_events_handler(WinitOutputEventsHandler {
-            engine: output.engine(),
-        });
+        // Configure input
+        input.set_events_handler(WinitOutputEventsHandler { engine });
+        input.set_handler(WinitInputHandler::new(self.keyboard.clone()));
 
         let input = InputWrapper(input);
         thread::spawn(move || {
