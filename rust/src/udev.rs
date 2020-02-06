@@ -1,3 +1,4 @@
+use crate::input::libinput::LibInputHandler;
 use smithay::backend::drm::egl::{EglDevice, EglSurface};
 use smithay::backend::drm::gbm::{egl::Gbm as EglGbmBackend, GbmDevice, GbmSurface};
 use smithay::backend::drm::legacy::LegacyDrmDevice;
@@ -35,8 +36,11 @@ use log::{error, info, trace};
 
 use crate::egl_util::{WrappedContext, WrappedSurface};
 
+use crate::input::keyboard::KeyboardManager;
 use crate::output::{FlutterEngineOptions, FlutterOutput, FlutterOutputBackend};
-use crate::FlutterDrmManager;
+use crate::{EngineWeakCollection, FlutterDrmManager};
+use parking_lot::Mutex;
+use smithay::backend::input::InputBackend;
 
 pub struct SessionFd(RawFd);
 impl AsRawFd for SessionFd {
@@ -81,6 +85,8 @@ pub trait UdevOutputManagerHandler {
 }
 
 pub struct UdevOutputManager<S: SessionNotifier + 'static> {
+    engines: EngineWeakCollection,
+    keyboard: Arc<Mutex<KeyboardManager>>,
     session: AutoSession,
     udev_session_id: AutoId,
     context: ::smithay::reexports::udev::Context,
@@ -95,6 +101,9 @@ pub fn new_udev(
     manager: &FlutterDrmManager,
     handler: Arc<dyn UdevOutputManagerHandler>,
 ) -> UdevOutputManager<impl SessionNotifier + 'static> {
+    let engines = EngineWeakCollection::new();
+    let keyboard = Arc::new(Mutex::new(KeyboardManager::new(engines.clone())));
+
     // Init session
     let (session, mut notifier) = AutoSession::new(None).ok_or(()).unwrap();
     let (udev_observer, udev_notifier) = notify_multiplexer();
@@ -115,6 +124,7 @@ pub fn new_udev(
     let udev_backend = UdevBackend::new(
         &context,
         UdevHandlerImpl {
+            engines: engines.clone(),
             handler,
             session: session.clone(),
             backends: HashMap::new(),
@@ -134,17 +144,8 @@ pub fn new_udev(
     );
     let libinput_session_id = notifier.register(libinput_context.observer());
     libinput_context.udev_assign_seat(&seat).unwrap();
-    let libinput_backend = LibinputInputBackend::new(libinput_context, None);
-    //    libinput_backend.set_handler(AnvilInputHandler::new_with_session(
-    //        None,
-    //        pointer,
-    //        keyboard,
-    //        window_map.clone(),
-    //        (w, h),
-    //        running.clone(),
-    //        pointer_location,
-    //        session,
-    //    ));
+    let mut libinput_backend = LibinputInputBackend::new(libinput_context, None);
+    libinput_backend.set_handler(LibInputHandler::new(keyboard.clone()));
 
     // Bind all our objects that get driven by the event loop
     let libinput_event_source = libinput_bind(libinput_backend, manager.event_loop.handle())
@@ -158,6 +159,8 @@ pub fn new_udev(
         .unwrap();
 
     UdevOutputManager {
+        engines,
+        keyboard,
         session,
         udev_session_id,
         context,
@@ -181,6 +184,7 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
 }
 
 struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
+    engines: EngineWeakCollection,
     handler: Arc<dyn UdevOutputManagerHandler>,
     session: AutoSession,
     backends: HashMap<
@@ -249,6 +253,8 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
                         // Create output
                         let backend = Arc::new(DrmOutputBackend { surface });
                         let output = FlutterOutput::new(backend.clone() as _, options);
+                        let engine = output.engine();
+                        self.engines.add(engine.downgrade());
 
                         backends.insert(crtc, output);
                         break;
