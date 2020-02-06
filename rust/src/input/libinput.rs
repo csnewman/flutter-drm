@@ -83,6 +83,14 @@ impl InputHandler<LibinputInputBackend> for LibInputHandler {
     }
 
     fn on_input_config_changed(&mut self, config: &mut [libinput::Device]) {
-        // TODO: Handle devices
+        let mut keyboards = Vec::new();
+
+        for device in config {
+            if device.has_capability(libinput::DeviceCapability::Keyboard) {
+                keyboards.push(device.clone());
+            }
+        }
+
+        self.keyboard.lock().update_devices(keyboards);
     }
 }

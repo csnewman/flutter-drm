@@ -6,6 +6,7 @@ use flutter_plugins::keyevent::{KeyAction, KeyActionType, KeyEventPlugin};
 use log::debug;
 use log::info;
 use smithay::backend::input::KeyState;
+use smithay::reexports::input as libinput;
 use std::thread;
 use std::time::{Duration, Instant};
 use xkbcommon::xkb;
@@ -144,6 +145,7 @@ pub struct KeyboardManager {
     current_config: Option<ActiveConfig>,
     repeat_sender: Sender<KeyRepeatAction>,
     engines: EngineWeakCollection,
+    devices: Vec<libinput::Device>,
 }
 
 impl KeyboardManager {
@@ -163,6 +165,7 @@ impl KeyboardManager {
             current_config: None,
             repeat_sender,
             engines,
+            devices: vec![],
         }
     }
 
@@ -230,6 +233,36 @@ impl KeyboardManager {
                 },
             })
             .unwrap();
+
+        self.update_leds();
+    }
+
+    pub fn update_devices(&mut self, devices: Vec<libinput::Device>) {
+        self.devices = devices;
+        self.update_leds();
+    }
+
+    fn update_leds(&mut self) {
+        let mut leds = libinput::Led::empty();
+
+        if let Some(config) = self.current_config.as_ref() {
+            if config
+                .state
+                .mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE)
+            {
+                leds |= libinput::Led::CAPSLOCK;
+            }
+            if config
+                .state
+                .mod_name_is_active(xkb::MOD_NAME_NUM, xkb::STATE_MODS_EFFECTIVE)
+            {
+                leds |= libinput::Led::NUMLOCK;
+            }
+        }
+
+        for device in &mut self.devices {
+            device.led_update(leds);
+        }
     }
 }
 

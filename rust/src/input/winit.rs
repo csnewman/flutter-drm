@@ -1,7 +1,7 @@
 use crate::input::keyboard::KeyboardManager;
 use crate::EngineWeakCollection;
 use parking_lot::Mutex;
-use smithay::backend::input::{InputBackend, InputHandler, KeyboardKeyEvent, Seat, UnusedEvent};
+use smithay::backend::input::{InputHandler, KeyboardKeyEvent, Seat, UnusedEvent};
 use smithay::backend::winit::{
     WinitInputBackend, WinitKeyboardInputEvent, WinitMouseInputEvent, WinitMouseMovedEvent,
     WinitMouseWheelEvent, WinitTouchCancelledEvent, WinitTouchEndedEvent, WinitTouchMovedEvent,
