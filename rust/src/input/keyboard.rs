@@ -255,18 +255,20 @@ fn key_event(rawcode: u32, keystate: KeyState, state: &xkb::State, engines: &Eng
     let modifiers = shift | ctrl << 1 | alt << 2 | logo << 3 | caps << 4 | num << 5;
 
     // Send key event to all engines
-    engines.for_each(|engine| {
-        engine.with_plugin(|plugin: &KeyEventPlugin| {
-            plugin.key_action(KeyAction {
-                toolkit: "glfw".to_string(),
-                key_code: keycode,
-                scan_code: scancode as i32,
-                modifiers,
-                keymap: "linux".to_string(),
-                _type: match keystate {
-                    KeyState::Released => KeyActionType::Keyup,
-                    KeyState::Pressed => KeyActionType::Keydown,
-                },
+    engines.for_each(move |engine| {
+        engine.run_on_platform_thread(move |engine| {
+            engine.with_plugin(move |plugin: &KeyEventPlugin| {
+                plugin.key_action(KeyAction {
+                    toolkit: "glfw".to_string(),
+                    key_code: keycode,
+                    scan_code: scancode as i32,
+                    modifiers,
+                    keymap: "linux".to_string(),
+                    _type: match keystate {
+                        KeyState::Released => KeyActionType::Keyup,
+                        KeyState::Pressed => KeyActionType::Keydown,
+                    },
+                });
             });
         });
     });
