@@ -125,6 +125,7 @@ pub fn new_udev(
         &context,
         UdevHandlerImpl {
             engines: engines.clone(),
+            keyboard: keyboard.clone(),
             handler,
             session: session.clone(),
             backends: HashMap::new(),
@@ -185,6 +186,7 @@ impl<S: SessionNotifier + 'static> UdevOutputManager<S> {
 
 struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
     engines: EngineWeakCollection,
+    keyboard: Arc<Mutex<KeyboardManager>>,
     handler: Arc<dyn UdevOutputManagerHandler>,
     session: AutoSession,
     backends: HashMap<
@@ -252,7 +254,11 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
 
                         // Create output
                         let backend = Arc::new(DrmOutputBackend { surface });
-                        let output = FlutterOutput::new(backend.clone() as _, options);
+                        let output = FlutterOutput::new(
+                            backend.clone() as _,
+                            options,
+                            self.keyboard.clone(),
+                        );
                         let engine = output.engine();
                         self.engines.add(engine.downgrade());
 

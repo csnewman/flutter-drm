@@ -1,5 +1,5 @@
 use crate::egl_util::{WrappedContext, WrappedDisplay};
-use crate::handler::SmithayFlutterHandler;
+use crate::handler::{SmithayFlutterHandler, SmithayTextInputHandler};
 use crossbeam::sync::Parker;
 use flutter_engine::FlutterEngine;
 use log::debug;
@@ -7,7 +7,10 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
+use crate::input::keyboard::KeyboardManager;
 use flutter_plugins::keyevent::KeyEventPlugin;
+use flutter_plugins::textinput::TextInputPlugin;
+use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::{panic, thread};
 
@@ -38,6 +41,7 @@ impl<B: FlutterOutputBackend + Send + Sync + 'static> Clone for FlutterOutput<B>
 fn create_output<B>(
     backend: Arc<B>,
     options: &mut FlutterEngineOptions,
+    keyboard: Arc<Mutex<KeyboardManager>>,
 ) -> (Parker, FlutterOutput<B>)
 where
     B: FlutterOutputBackend + Send + Sync + 'static,
@@ -67,6 +71,12 @@ where
     );
 
     engine.add_plugin(KeyEventPlugin::default());
+    engine.add_plugin(TextInputPlugin::new(Arc::new(Mutex::new(
+        SmithayTextInputHandler {
+            keyboard,
+            engine: engine.downgrade(),
+        },
+    ))));
 
     if let Some(callback) = options.callback.take() {
         callback(&engine);
@@ -95,7 +105,7 @@ where
 
     output
         .engine
-        .send_window_metrics_event(width as usize, height as usize, 1.0);
+        .send_window_metrics_event(width as usize, height as usize, height as f64 / 1080.0);
 
     let running = Arc::new(AtomicBool::new(true));
     while running.load(Ordering::SeqCst) {
@@ -105,7 +115,11 @@ where
 }
 
 impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
-    pub(crate) fn new(backend: Arc<B>, options: FlutterEngineOptions) -> Self {
+    pub(crate) fn new(
+        backend: Arc<B>,
+        options: FlutterEngineOptions,
+        keyboard: Arc<Mutex<KeyboardManager>>,
+    ) -> Self {
         debug!("Creating new flutter output");
 
         let (send, recv) = mpsc::channel();
@@ -114,7 +128,7 @@ impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
             let mut has_sent = false;
             let result = panic::catch_unwind(AssertUnwindSafe(move || {
                 let mut options = options;
-                let (parker, output) = create_output(backend, &mut options);
+                let (parker, output) = create_output(backend, &mut options, keyboard);
                 send.send(Ok(output.clone())).unwrap();
                 has_sent = true;
                 run_output(parker, output, &options);

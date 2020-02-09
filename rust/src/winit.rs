@@ -77,7 +77,7 @@ impl WinitOutputManager {
 
         // Create output
         let backend = Arc::new(WinitOutputBackend { graphics });
-        let output = FlutterOutput::new(backend, options);
+        let output = FlutterOutput::new(backend, options, self.keyboard.clone());
         let engine = output.engine();
         self.engines.add(engine.downgrade());
 

@@ -2,7 +2,9 @@ use crate::input::glfw;
 use crate::EngineWeakCollection;
 use crossbeam::channel;
 use crossbeam::channel::{Receiver, RecvTimeoutError, Sender};
+use flutter_engine::FlutterEngineWeakRef;
 use flutter_plugins::keyevent::{KeyAction, KeyActionType, KeyEventPlugin};
+use flutter_plugins::textinput::TextInputPlugin;
 use log::debug;
 use log::info;
 use smithay::backend::input::KeyState;
@@ -10,6 +12,8 @@ use smithay::reexports::input as libinput;
 use std::thread;
 use std::time::{Duration, Instant};
 use xkbcommon::xkb;
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyboardConfig {
@@ -48,8 +52,9 @@ struct KeyRepeatInfo {
 
 unsafe impl Send for KeyRepeatInfo {}
 
-fn key_repeater_thread(repeat_recv: Receiver<KeyRepeatAction>, engines: EngineWeakCollection) {
-    let rate = 500;
+fn key_repeater_thread(repeat_recv: Receiver<KeyRepeatAction>, engines: EngineWeakCollection,
+                       textinput: Arc<Mutex<Option<FlutterEngineWeakRef>>>) {
+    let rate = 50;
     let delay = 1000;
 
     let mut repeat = None;
@@ -88,6 +93,7 @@ fn key_repeater_thread(repeat_recv: Receiver<KeyRepeatAction>, engines: EngineWe
                     KeyState::Pressed,
                     &repeat_info.state,
                     &engines,
+                    &textinput
                 );
 
                 next_send = now + Duration::from_millis(rate);
@@ -146,7 +152,10 @@ pub struct KeyboardManager {
     repeat_sender: Sender<KeyRepeatAction>,
     engines: EngineWeakCollection,
     devices: Vec<libinput::Device>,
+    textinput: Arc<Mutex<Option<FlutterEngineWeakRef>>>,
 }
+
+unsafe impl Send for KeyboardManager {}
 
 impl KeyboardManager {
     pub fn new(engines: EngineWeakCollection) -> Self {
@@ -154,10 +163,13 @@ impl KeyboardManager {
 
         let (repeat_sender, repeat_recv) = channel::unbounded();
 
+        let textinput = Arc::new(Mutex::new(None));
+
         let engines_copy = engines.clone();
+        let textinput_copy = textinput.clone();
         thread::Builder::new()
             .name("keyboard-keyrepeater".to_string())
-            .spawn(move || key_repeater_thread(repeat_recv, engines_copy))
+            .spawn(move || key_repeater_thread(repeat_recv, engines_copy, textinput_copy))
             .expect("Failed to create key repeater thread");
 
         Self {
@@ -166,6 +178,7 @@ impl KeyboardManager {
             repeat_sender,
             engines,
             devices: vec![],
+            textinput,
         }
     }
 
@@ -179,7 +192,7 @@ impl KeyboardManager {
                 layout: "".to_string(),
                 variant: "".to_string(),
                 options: None,
-                rate: 500,
+                rate: 50,
                 delay: 1000,
             };
 
@@ -219,7 +232,7 @@ impl KeyboardManager {
         config.state.update_key(scancode, direction);
 
         // Dispatch key press
-        key_event(rawcode, keystate, &mut config.state, &self.engines);
+        key_event(rawcode, keystate, &mut config.state, &self.engines, &self.textinput);
 
         self.repeat_sender
             .send(match keystate {
@@ -264,9 +277,28 @@ impl KeyboardManager {
             device.led_update(leds);
         }
     }
+
+    pub fn set_text_target(&mut self, engine: FlutterEngineWeakRef) {
+        *self.textinput.lock() = Some(engine);
+    }
+
+    pub fn clear_text_target(&mut self, engine: FlutterEngineWeakRef) {
+        let mut textinput = self.textinput.lock();
+        if let Some(current) = textinput.take() {
+            if !current.ptr_equal(engine) {
+                *textinput = Some(current);
+            }
+        }
+    }
 }
 
-fn key_event(rawcode: u32, keystate: KeyState, state: &xkb::State, engines: &EngineWeakCollection) {
+fn key_event(
+    rawcode: u32,
+    keystate: KeyState,
+    state: &xkb::State,
+    engines: &EngineWeakCollection,
+    textinput: &Arc<Mutex<Option<FlutterEngineWeakRef>>>,
+) {
     // Offset the rawcode by 8, as the evdev XKB rules reflect X's
     // broken keycode system, which starts at 8.
     let scancode = rawcode + 8;
@@ -306,16 +338,23 @@ fn key_event(rawcode: u32, keystate: KeyState, state: &xkb::State, engines: &Eng
         });
     });
 
-    // TODO: Reimplement char sending
-    //
-    //    // Send text events
-    //    if !content.is_empty()
-    //        && keystate == KeyState::Pressed
-    //        && content.chars().all(|x| !x.is_control())
-    //    {
-    //        textinput.with_state(|state| {
-    //            state.add_characters(&content);
-    //        });
-    //        textinput.notify_changes();
-    //    }
+    // Send text events
+    if !content.is_empty()
+        && keystate == KeyState::Pressed
+        && content.chars().all(|x| !x.is_control())
+    {
+        let textinput = textinput.lock();
+        if let Some(engine) = textinput.as_ref() {
+            if let Some(engine) = engine.upgrade() {
+                engine.run_on_platform_thread(move |engine| {
+                    engine.with_plugin_mut(move |plugin: &mut TextInputPlugin| {
+                        plugin.with_state(|state| {
+                            state.add_characters(&content);
+                        });
+                        plugin.notify_changes();
+                    });
+                });
+            }
+        }
+    }
 }

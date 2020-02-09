@@ -1,5 +1,4 @@
 use crate::input::keyboard::KeyboardManager;
-use crate::EngineWeakCollection;
 use parking_lot::Mutex;
 use smithay::backend::input::{InputHandler, KeyboardKeyEvent, Seat, UnusedEvent};
 use smithay::backend::winit::{

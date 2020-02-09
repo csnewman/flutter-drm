@@ -1,13 +1,16 @@
 use crate::egl_util::{WrappedContext, WrappedDisplay};
 use async_std::task;
-use flutter_engine::FlutterEngineHandler;
+use flutter_engine::{FlutterEngineHandler, FlutterEngineWeakRef};
 use futures_task::FutureObj;
 use std::future::Future;
 use std::os::raw::c_void;
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
+use crate::input::keyboard::KeyboardManager;
 use crate::output::FlutterOutputBackend;
 use crossbeam::sync::Unparker;
+use flutter_plugins::textinput::TextInputHandler;
+use parking_lot::Mutex;
 use smithay::backend::egl::ffi;
 
 pub struct SmithayFlutterHandler {
@@ -68,5 +71,20 @@ impl FlutterEngineHandler for SmithayFlutterHandler {
 
     fn run_in_background(&self, func: Box<dyn Future<Output = ()> + Send + 'static>) {
         task::spawn(FutureObj::new(func));
+    }
+}
+
+pub struct SmithayTextInputHandler {
+    pub keyboard: Arc<Mutex<KeyboardManager>>,
+    pub engine: FlutterEngineWeakRef,
+}
+
+impl TextInputHandler for SmithayTextInputHandler {
+    fn show(&mut self) {
+        self.keyboard.lock().set_text_target(self.engine.clone());
+    }
+
+    fn hide(&mut self) {
+        self.keyboard.lock().clear_text_target(self.engine.clone());
     }
 }
