@@ -11,7 +11,7 @@ use smithay::backend::winit::{
     WinitEventsHandler, WinitGraphicsBackend, WinitInputBackend, WinitInputError,
 };
 
-pub use ::winit::{dpi::LogicalSize, dpi::PhysicalSize, WindowBuilder};
+pub use ::winit::{dpi::LogicalSize, dpi::PhysicalSize, window::WindowBuilder};
 
 use crate::input::keyboard::KeyboardManager;
 use crate::input::winit::WinitInputHandler;

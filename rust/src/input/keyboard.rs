@@ -7,13 +7,13 @@ use flutter_plugins::keyevent::{KeyAction, KeyActionType, KeyEventPlugin};
 use flutter_plugins::textinput::TextInputPlugin;
 use log::debug;
 use log::info;
+use parking_lot::Mutex;
 use smithay::backend::input::KeyState;
 use smithay::reexports::input as libinput;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use xkbcommon::xkb;
-use parking_lot::Mutex;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyboardConfig {
@@ -52,8 +52,11 @@ struct KeyRepeatInfo {
 
 unsafe impl Send for KeyRepeatInfo {}
 
-fn key_repeater_thread(repeat_recv: Receiver<KeyRepeatAction>, engines: EngineWeakCollection,
-                       textinput: Arc<Mutex<Option<FlutterEngineWeakRef>>>) {
+fn key_repeater_thread(
+    repeat_recv: Receiver<KeyRepeatAction>,
+    engines: EngineWeakCollection,
+    textinput: Arc<Mutex<Option<FlutterEngineWeakRef>>>,
+) {
     let rate = 50;
     let delay = 1000;
 
@@ -93,7 +96,7 @@ fn key_repeater_thread(repeat_recv: Receiver<KeyRepeatAction>, engines: EngineWe
                     KeyState::Pressed,
                     &repeat_info.state,
                     &engines,
-                    &textinput
+                    &textinput,
                 );
 
                 next_send = now + Duration::from_millis(rate);
@@ -232,7 +235,13 @@ impl KeyboardManager {
         config.state.update_key(scancode, direction);
 
         // Dispatch key press
-        key_event(rawcode, keystate, &mut config.state, &self.engines, &self.textinput);
+        key_event(
+            rawcode,
+            keystate,
+            &mut config.state,
+            &self.engines,
+            &self.textinput,
+        );
 
         self.repeat_sender
             .send(match keystate {

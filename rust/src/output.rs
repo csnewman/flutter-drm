@@ -8,10 +8,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
 use crate::input::keyboard::KeyboardManager;
+use flutter_engine::builder::FlutterEngineBuilder;
 use flutter_plugins::keyevent::KeyEventPlugin;
 use flutter_plugins::textinput::TextInputPlugin;
 use parking_lot::Mutex;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use std::{panic, thread};
 
 pub trait FlutterOutputBackend {
@@ -65,10 +67,12 @@ where
         unparker,
     });
 
-    let engine = FlutterEngine::new(
-        Arc::downgrade(&engine_handler) as _,
-        options.assets_path.clone(),
-    );
+    let engine = FlutterEngineBuilder::new()
+        .with_handler(Arc::downgrade(&engine_handler) as _)
+        .with_asset_path(options.assets_path.clone())
+        .with_args(options.arguments.clone())
+        .build()
+        .expect("Failed to create engine");
 
     engine.add_plugin(KeyEventPlugin::default());
     engine.add_plugin(TextInputPlugin::new(Arc::new(Mutex::new(
@@ -92,25 +96,38 @@ where
     )
 }
 
-fn run_output<B>(parker: Parker, output: FlutterOutput<B>, options: &FlutterEngineOptions)
+fn run_output<B>(parker: Parker, output: FlutterOutput<B>)
 where
     B: FlutterOutputBackend + Send + Sync + 'static,
 {
     let (width, height) = output.backend.get_framebuffer_dimensions();
 
-    output
-        .engine
-        .run(&options.arguments)
-        .expect("Failed to start engine");
+    output.engine.run().expect("Failed to start engine");
 
-    output
-        .engine
-        .send_window_metrics_event(width as usize, height as usize, height as f64 / 1080.0);
+    //    let now = Instant::now();
+    //    output
+    //        .engine
+    //        .notify_vsync(now, now + Duration::from_millis(16));
+
+    output.engine.send_window_metrics_event(
+        width as usize,
+        height as usize,
+        height as f64 / 1080.0,
+    );
 
     let running = Arc::new(AtomicBool::new(true));
     while running.load(Ordering::SeqCst) {
-        output.engine.execute_platform_tasks();
-        parker.park();
+        let duration = match output.engine.execute_platform_tasks() {
+            None => Duration::from_millis(100), // Just in case, wake up every so often.
+            Some(tgt) => {
+                let now = Instant::now();
+                if tgt <= now {
+                    continue;
+                }
+                tgt - now
+            }
+        };
+        parker.park_timeout(duration);
     }
 }
 
@@ -131,7 +148,7 @@ impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
                 let (parker, output) = create_output(backend, &mut options, keyboard);
                 send.send(Ok(output.clone())).unwrap();
                 has_sent = true;
-                run_output(parker, output, &options);
+                run_output(parker, output);
             }));
             if let Err(err) = result {
                 if has_sent {

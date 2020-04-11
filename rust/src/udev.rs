@@ -18,7 +18,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use smithay::reexports::calloop::{
-    generic::{EventedFd, Generic},
+    generic::{Generic, SourceFd},
     LoopHandle, Source,
 };
 
@@ -41,6 +41,7 @@ use crate::output::{FlutterEngineOptions, FlutterOutput, FlutterOutputBackend};
 use crate::{EngineWeakCollection, FlutterDrmManager};
 use parking_lot::Mutex;
 use smithay::backend::input::InputBackend;
+use std::time::{Duration, Instant};
 
 pub struct SessionFd(RawFd);
 impl AsRawFd for SessionFd {
@@ -92,9 +93,9 @@ pub struct UdevOutputManager<S: SessionNotifier + 'static> {
     context: ::smithay::reexports::udev::Context,
     seat: String,
     libinput_session_id: AutoId,
-    libinput_event_source: Source<Generic<EventedFd<LibinputInputBackend>>>,
+    libinput_event_source: Source<Generic<SourceFd<LibinputInputBackend>>>,
     session_event_source: BoundAutoSession,
-    udev_event_source: Source<Generic<EventedFd<UdevBackend<UdevHandlerImpl<S, ()>>>>>,
+    udev_event_source: Source<Generic<SourceFd<UdevBackend<UdevHandlerImpl<S, ()>>>>>,
 }
 
 pub fn new_udev(
@@ -193,7 +194,7 @@ struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
         dev_t,
         (
             S::Id,
-            Source<Generic<EventedFd<RenderDevice>>>,
+            Source<Generic<SourceFd<RenderDevice>>>,
             Rc<RefCell<HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>>>>,
         ),
     >,
@@ -213,9 +214,9 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
         let connector_infos: Vec<ConnectorInfo> = res_handles
             .connectors()
             .iter()
-            .map(|conn| device.resource_info::<ConnectorInfo>(*conn).unwrap())
-            .filter(|conn| conn.connection_state() == ConnectorState::Connected)
-            .inspect(|conn| info!("Connected: {:?}", conn.connector_type()))
+            .map(|conn| device.get_connector_info(*conn).unwrap())
+            .filter(|conn| conn.state() == ConnectorState::Connected)
+            .inspect(|conn| info!("Connected: {:?}", conn.interface()))
             .collect();
 
         let mut backends = HashMap::new();
@@ -225,13 +226,15 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
             let encoder_infos = connector_info
                 .encoders()
                 .iter()
-                .flat_map(|encoder_handle| device.resource_info::<EncoderInfo>(*encoder_handle))
+                .filter_map(|e| *e)
+                .flat_map(|encoder_handle| device.get_encoder_info(encoder_handle))
                 .collect::<Vec<EncoderInfo>>();
             for encoder_info in encoder_infos {
                 'inner: for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
                     if !backends.contains_key(&crtc) {
-                        let info = device.resource_info::<crtc::Info>(crtc);
-                        info!("CRTC Info: {:?}", info);
+                        // device.get_crtc_info()
+                        // let info = device.resource_info::<crtc::Info>(crtc);
+                        // info!("CRTC Info: {:?}", info);
 
                         let options = match self.handler.configure_output() {
                             Some(opts) => opts,
@@ -363,6 +366,10 @@ impl DeviceHandler for DrmHandlerImpl {
     fn vblank(&mut self, crtc: crtc::Handle) {
         if let Some(_engine) = self.backends.borrow().get(&crtc) {
             trace!("vblank");
+            //            let now = Instant::now();
+            //            _engine
+            //                .engine()
+            //                .notify_vsync(now + Duration::from_millis(16), now + Duration::from_millis(32));
         }
     }
 
