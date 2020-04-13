@@ -1,5 +1,5 @@
 use crate::egl_util::{WrappedContext, WrappedDisplay};
-use crate::handler::{SmithayFlutterHandler, SmithayTextInputHandler};
+use crate::handler::{SmithayOpenGLHandler, SmithayPlatformTaskHandler, SmithayTextInputHandler};
 use crossbeam::sync::Parker;
 use flutter_engine::FlutterEngine;
 use log::debug;
@@ -24,30 +24,32 @@ pub trait FlutterOutputBackend {
     fn get_framebuffer_dimensions(&self) -> (u32, u32);
 }
 
-pub struct FlutterOutput<B: FlutterOutputBackend + Send + Sync + 'static> {
+pub struct FlutterOutput {
     engine: FlutterEngine,
-    engine_handler: Arc<SmithayFlutterHandler>,
-    backend: Arc<B>,
+    width: u32,
+    height: u32,
 }
 
-impl<B: FlutterOutputBackend + Send + Sync + 'static> Clone for FlutterOutput<B> {
+impl Clone for FlutterOutput {
     fn clone(&self) -> Self {
         Self {
             engine: self.engine.clone(),
-            engine_handler: self.engine_handler.clone(),
-            backend: self.backend.clone(),
+            width: self.width,
+            height: self.height,
         }
     }
 }
 
 fn create_output<B>(
-    backend: Arc<B>,
+    backend: B,
     options: &mut FlutterEngineOptions,
     keyboard: Arc<Mutex<KeyboardManager>>,
-) -> (Parker, FlutterOutput<B>)
+) -> (Parker, FlutterOutput)
 where
-    B: FlutterOutputBackend + Send + Sync + 'static,
+    B: FlutterOutputBackend + Send + 'static,
 {
+    let (width, height) = backend.get_framebuffer_dimensions();
+
     let (resource_context, display) = unsafe {
         backend.make_current().expect("Invalid backend context");
 
@@ -60,15 +62,13 @@ where
     let parker = Parker::new();
     let unparker = parker.unparker().clone();
 
-    let engine_handler = Arc::new(SmithayFlutterHandler {
-        backend: Arc::downgrade(&backend) as _,
-        display,
-        resource_context,
-        unparker,
-    });
+    let platform_task_handler = Arc::new(SmithayPlatformTaskHandler::new(unparker));
+
+    let opengl_handler = SmithayOpenGLHandler::new(Box::new(backend), display, resource_context);
 
     let engine = FlutterEngineBuilder::new()
-        .with_handler(Arc::downgrade(&engine_handler) as _)
+        .with_platform_handler(platform_task_handler)
+        .with_opengl(opengl_handler)
         .with_asset_path(options.assets_path.clone())
         .with_args(options.arguments.clone())
         .build()
@@ -90,18 +90,13 @@ where
         parker,
         FlutterOutput {
             engine,
-            engine_handler,
-            backend,
+            width,
+            height,
         },
     )
 }
 
-fn run_output<B>(parker: Parker, output: FlutterOutput<B>)
-where
-    B: FlutterOutputBackend + Send + Sync + 'static,
-{
-    let (width, height) = output.backend.get_framebuffer_dimensions();
-
+fn run_output(parker: Parker, output: FlutterOutput) {
     output.engine.run().expect("Failed to start engine");
 
     //    let now = Instant::now();
@@ -110,9 +105,9 @@ where
     //        .notify_vsync(now, now + Duration::from_millis(16));
 
     output.engine.send_window_metrics_event(
-        width as usize,
-        height as usize,
-        height as f64 / 1080.0,
+        output.width as usize,
+        output.height as usize,
+        output.height as f64 / 1080.0,
     );
 
     let running = Arc::new(AtomicBool::new(true));
@@ -131,12 +126,15 @@ where
     }
 }
 
-impl<B: FlutterOutputBackend + Send + Sync + 'static> FlutterOutput<B> {
-    pub(crate) fn new(
-        backend: Arc<B>,
+impl FlutterOutput {
+    pub(crate) fn new<B>(
+        backend: B,
         options: FlutterEngineOptions,
         keyboard: Arc<Mutex<KeyboardManager>>,
-    ) -> Self {
+    ) -> Self
+    where
+        B: FlutterOutputBackend + Send + 'static,
+    {
         debug!("Creating new flutter output");
 
         let (send, recv) = mpsc::channel();

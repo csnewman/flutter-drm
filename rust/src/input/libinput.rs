@@ -1,18 +1,23 @@
 use crate::input::keyboard::KeyboardManager;
 use parking_lot::Mutex;
-use smithay::backend::input::{InputHandler, KeyboardKeyEvent, Seat};
+use smithay::backend::input::{InputHandler, KeyState, KeyboardKeyEvent, Seat};
 use smithay::backend::libinput::LibinputInputBackend;
 use smithay::reexports::input as libinput;
 use smithay::reexports::input::event;
 use std::sync::Arc;
 
+use log::error;
+use smithay::backend::session::auto::AutoSession;
+use smithay::backend::session::Session;
+
 pub struct LibInputHandler {
     keyboard: Arc<Mutex<KeyboardManager>>,
+    session: AutoSession,
 }
 
 impl LibInputHandler {
-    pub fn new(keyboard: Arc<Mutex<KeyboardManager>>) -> Self {
-        Self { keyboard }
+    pub fn new(keyboard: Arc<Mutex<KeyboardManager>>, session: AutoSession) -> Self {
+        Self { keyboard, session }
     }
 }
 
@@ -40,6 +45,15 @@ impl InputHandler<LibinputInputBackend> for LibInputHandler {
         let keycode = event.key_code();
         let state = event.state();
         keyboard.key(keycode, state);
+
+        // error!("keycode: {}", keycode);
+        if state == KeyState::Pressed {
+            if keycode >= 59 && keycode <= 70 {
+                let vt = keycode - 59 + 1;
+                error!("vt switch: {}", vt);
+                self.session.change_vt(vt as i32);
+            }
+        }
     }
 
     fn on_pointer_move(&mut self, seat: &Seat, event: event::pointer::PointerMotionEvent) {

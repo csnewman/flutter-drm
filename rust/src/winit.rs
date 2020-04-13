@@ -65,7 +65,7 @@ impl WinitOutputManager {
         &self,
         builder: WindowBuilder,
         options: FlutterEngineOptions,
-    ) -> FlutterOutput<WinitOutputBackend> {
+    ) -> FlutterOutput {
         debug!("Creating window");
         let (graphics, mut input) = winit::init_from_builder(builder, None).unwrap();
 
@@ -76,7 +76,7 @@ impl WinitOutputManager {
         }
 
         // Create output
-        let backend = Arc::new(WinitOutputBackend { graphics });
+        let backend = WinitOutputBackend { graphics };
         let output = FlutterOutput::new(backend, options, self.keyboard.clone());
         let engine = output.engine();
         self.engines.add(engine.downgrade());

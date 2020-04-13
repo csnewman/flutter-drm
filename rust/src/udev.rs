@@ -41,9 +41,9 @@ use crate::output::{FlutterEngineOptions, FlutterOutput, FlutterOutputBackend};
 use crate::{EngineWeakCollection, FlutterDrmManager};
 use parking_lot::Mutex;
 use smithay::backend::input::InputBackend;
-use std::time::{Duration, Instant};
 
 pub struct SessionFd(RawFd);
+
 impl AsRawFd for SessionFd {
     fn as_raw_fd(&self) -> RawFd {
         self.0
@@ -90,7 +90,6 @@ pub struct UdevOutputManager<S: SessionNotifier + 'static> {
     keyboard: Arc<Mutex<KeyboardManager>>,
     session: AutoSession,
     udev_session_id: AutoId,
-    context: ::smithay::reexports::udev::Context,
     seat: String,
     libinput_session_id: AutoId,
     libinput_event_source: Source<Generic<SourceFd<LibinputInputBackend>>>,
@@ -111,9 +110,6 @@ pub fn new_udev(
     let udev_session_id = notifier.register(udev_observer);
 
     // Initialize the udev backend
-    let context = ::smithay::reexports::udev::Context::new()
-        .map_err(|_| ())
-        .unwrap();
     let seat = session.seat();
 
     // TODO: Find primary gpu
@@ -123,7 +119,6 @@ pub fn new_udev(
     //    }
 
     let udev_backend = UdevBackend::new(
-        &context,
         UdevHandlerImpl {
             engines: engines.clone(),
             keyboard: keyboard.clone(),
@@ -140,14 +135,12 @@ pub fn new_udev(
     .unwrap();
 
     // Initialize libinput backend
-    let mut libinput_context = Libinput::new_from_udev::<LibinputSessionInterface<AutoSession>>(
-        session.clone().into(),
-        &context,
-    );
+    let mut libinput_context =
+        Libinput::new_with_udev::<LibinputSessionInterface<AutoSession>>(session.clone().into());
     let libinput_session_id = notifier.register(libinput_context.observer());
     libinput_context.udev_assign_seat(&seat).unwrap();
     let mut libinput_backend = LibinputInputBackend::new(libinput_context, None);
-    libinput_backend.set_handler(LibInputHandler::new(keyboard.clone()));
+    libinput_backend.set_handler(LibInputHandler::new(keyboard.clone(), session.clone()));
 
     // Bind all our objects that get driven by the event loop
     let libinput_event_source = libinput_bind(libinput_backend, manager.event_loop.handle())
@@ -165,7 +158,6 @@ pub fn new_udev(
         keyboard,
         session,
         udev_session_id,
-        context,
         seat,
         libinput_session_id,
         libinput_event_source,
@@ -195,7 +187,7 @@ struct UdevHandlerImpl<S: SessionNotifier, Data: 'static> {
         (
             S::Id,
             Source<Generic<SourceFd<RenderDevice>>>,
-            Rc<RefCell<HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>>>>,
+            Rc<RefCell<HashMap<crtc::Handle, FlutterOutput>>>,
         ),
     >,
     loop_handle: LoopHandle<Data>,
@@ -206,7 +198,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
     pub fn scan_connectors(
         &self,
         device: &mut RenderDevice,
-    ) -> HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>> {
+    ) -> HashMap<crtc::Handle, FlutterOutput> {
         // Get a set of all modesetting resource handles (excluding planes)
         let res_handles = device.resource_handles().unwrap();
 
@@ -256,12 +248,8 @@ impl<S: SessionNotifier, Data: 'static> UdevHandlerImpl<S, Data> {
                         let surface = render_context.create_surface(surface);
 
                         // Create output
-                        let backend = Arc::new(DrmOutputBackend { surface });
-                        let output = FlutterOutput::new(
-                            backend.clone() as _,
-                            options,
-                            self.keyboard.clone(),
-                        );
+                        let backend = DrmOutputBackend { surface };
+                        let output = FlutterOutput::new(backend, options, self.keyboard.clone());
                         let engine = output.engine();
                         self.engines.add(engine.downgrade());
 
@@ -357,7 +345,7 @@ impl<S: SessionNotifier, Data: 'static> UdevHandler for UdevHandlerImpl<S, Data>
 }
 
 pub struct DrmHandlerImpl {
-    backends: Rc<RefCell<HashMap<crtc::Handle, FlutterOutput<DrmOutputBackend>>>>,
+    backends: Rc<RefCell<HashMap<crtc::Handle, FlutterOutput>>>,
 }
 
 impl DeviceHandler for DrmHandlerImpl {

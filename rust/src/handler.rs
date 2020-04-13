@@ -1,47 +1,64 @@
 use crate::egl_util::{WrappedContext, WrappedDisplay};
-use async_std::task;
-use flutter_engine::{FlutterEngineHandler, FlutterEngineWeakRef};
-use futures_task::FutureObj;
-use std::future::Future;
+use flutter_engine::{FlutterEngineWeakRef, FlutterOpenGLHandler};
 use std::os::raw::c_void;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use crate::input::keyboard::KeyboardManager;
 use crate::output::FlutterOutputBackend;
 use crossbeam::sync::Unparker;
+use flutter_engine::tasks::TaskRunnerHandler;
 use flutter_plugins::textinput::TextInputHandler;
 use parking_lot::Mutex;
 use smithay::backend::egl::ffi;
 
-pub struct SmithayFlutterHandler {
-    pub backend: Weak<dyn FlutterOutputBackend>,
-    pub display: WrappedDisplay,
-    pub resource_context: WrappedContext,
-    pub unparker: Unparker,
+pub(crate) struct SmithayPlatformTaskHandler {
+    unparker: Unparker,
 }
 
-unsafe impl Send for SmithayFlutterHandler {}
+impl SmithayPlatformTaskHandler {
+    pub(crate) fn new(unparker: Unparker) -> Self {
+        Self { unparker }
+    }
+}
 
-unsafe impl Sync for SmithayFlutterHandler {}
+impl TaskRunnerHandler for SmithayPlatformTaskHandler {
+    fn wake(&self) {
+        self.unparker.unpark();
+    }
+}
 
-impl FlutterEngineHandler for SmithayFlutterHandler {
+pub(crate) struct SmithayOpenGLHandler {
+    backend: Box<dyn FlutterOutputBackend + Send>,
+    display: WrappedDisplay,
+    resource_context: WrappedContext,
+}
+
+impl SmithayOpenGLHandler {
+    pub(crate) fn new(
+        backend: Box<dyn FlutterOutputBackend + Send>,
+        display: WrappedDisplay,
+        resource_context: WrappedContext,
+    ) -> Self {
+        Self {
+            backend,
+            display,
+            resource_context,
+        }
+    }
+}
+
+impl FlutterOpenGLHandler for SmithayOpenGLHandler {
     fn swap_buffers(&self) -> bool {
-        match self.backend.upgrade() {
-            None => false,
-            Some(backend) => match backend.swap_buffers() {
-                Ok(_) => true,
-                Err(_) => false,
-            },
+        match self.backend.swap_buffers() {
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
 
     fn make_current(&self) -> bool {
-        match self.backend.upgrade() {
-            None => false,
-            Some(backend) => match backend.make_current() {
-                Ok(_) => true,
-                Err(_) => false,
-            },
+        match self.backend.make_current() {
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
 
@@ -63,14 +80,6 @@ impl FlutterEngineHandler for SmithayFlutterHandler {
 
     fn gl_proc_resolver(&self, proc: *const i8) -> *mut c_void {
         unsafe { ffi::egl::GetProcAddress(proc) as _ }
-    }
-
-    fn wake_platform_thread(&self) {
-        self.unparker.unpark();
-    }
-
-    fn run_in_background(&self, func: Box<dyn Future<Output = ()> + Send + 'static>) {
-        task::spawn(FutureObj::new(func));
     }
 }
 
